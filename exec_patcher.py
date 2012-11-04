@@ -20,7 +20,7 @@ def Monkeypatcher(name, bases, namespace):
     setattr(base, '__patched__', True)
     return base
 
-class AsyncProcess(execmodule.AsyncProcess):
+class PatchedAsyncProcess(execmodule.AsyncProcess):
     __metaclass__ = Monkeypatcher
     def __init__(self, arg_list, env, listener,
             # "path" is an option in build systems
@@ -79,7 +79,7 @@ else:
 # easy way of associating windows with their output panels, without causing strange bugs
 panelsByWindow = {}
 
-class ExecCommand(execmodule.ExecCommand):
+class PatchedExecCommand(execmodule.ExecCommand):
     __metaclass__ = Monkeypatcher
     def on_input_complete(self, value = None):
         """Show the output (which gets hidden) after taking the input"""
