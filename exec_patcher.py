@@ -1,32 +1,38 @@
 """This module patches the built in ExecCommand used by build systems to allow input via a keyboard shortcut"""
 
 import os, sys
-import thread
+import threading
 import subprocess
 import time
 import sublime_plugin
+import Default
 
-execmodule = __import__('exec')
+execmodule = getattr(Default, 'exec')
 
 def Monkeypatcher(name, bases, namespace):
     """http://mail.python.org/pipermail/python-dev/2008-January/076194.html"""
     base = bases[0]
     if hasattr(base, '__patched__'):
         return
-    for name, value in namespace.iteritems():
+    for name, value in namespace.items():
         if name != "__metaclass__":
             setattr(base, name, value)
     base.__bases__ += bases[1:]
     setattr(base, '__patched__', True)
     return base
 
-class PatchedAsyncProcess(execmodule.AsyncProcess):
-    __metaclass__ = Monkeypatcher
-    def __init__(self, arg_list, env, listener,
+class PatchedAsyncProcess(execmodule.AsyncProcess, metaclass=Monkeypatcher):
+    def __init__(self, cmd, shell_cmd, env, listener,
             # "path" is an option in build systems
             path="",
             # "shell" is an options in build systems
             shell=False):
+
+        if not shell_cmd and not cmd:
+            raise ValueError("shell_cmd or cmd is required")
+
+        if shell_cmd and not isinstance(shell_cmd, str):
+            raise ValueError("shell_cmd must be a string")
 
         self.listener = listener
         self.killed = False
@@ -39,30 +45,46 @@ class PatchedAsyncProcess(execmodule.AsyncProcess):
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-        # Set temporary PATH to locate executable in arg_list
+        # Set temporary PATH to locate executable in cmd
         if path:
             old_path = os.environ["PATH"]
             # The user decides in the build system whether he wants to append $PATH
             # or tuck it at the front: "$PATH;C:\\new\\path", "C:\\new\\path;$PATH"
-            os.environ["PATH"] = os.path.expandvars(path).encode(sys.getfilesystemencoding())
+            os.environ["PATH"] = os.path.expandvars(path)
 
         proc_env = os.environ.copy()
         proc_env.update(env)
-        for k, v in proc_env.iteritems():
-            proc_env[k] = os.path.expandvars(v).encode(sys.getfilesystemencoding())
+        for k, v in proc_env.items():
+            proc_env[k] = os.path.expandvars(v)
 
         # Patched here
-        self.proc = subprocess.Popen(arg_list, stdout=subprocess.PIPE, stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE, startupinfo=startupinfo, env=proc_env, shell=shell)
+        if shell_cmd and sys.platform == "win32":
+            # Use shell=True on Windows, so shell_cmd is passed through with the correct escaping
+            self.proc = subprocess.Popen(shell_cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE,
+                stderr=subprocess.PIPE, startupinfo=startupinfo, env=proc_env, shell=True)
+        elif shell_cmd and sys.platform == "darwin":
+            # Use a login shell on OSX, otherwise the users expected env vars won't be setup
+            self.proc = subprocess.Popen(["/bin/bash", "-l", "-c", shell_cmd], stdout=subprocess.PIPE,
+                stdin=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, env=proc_env, shell=False)
+        elif shell_cmd and sys.platform == "linux":
+            # Explicitly use /bin/bash on Linux, to keep Linux and OSX as
+            # similar as possible. A login shell is explicitly not used for
+            # linux, as it's not required
+            self.proc = subprocess.Popen(["/bin/bash", "-c", shell_cmd], stdout=subprocess.PIPE,
+                stdin=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, env=proc_env, shell=False)
+        else:
+            # Old style build system, just do what it asks
+            self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE,
+                stderr=subprocess.PIPE, startupinfo=startupinfo, env=proc_env, shell=shell)
 
         if path:
             os.environ["PATH"] = old_path
 
         if self.proc.stdout:
-            thread.start_new_thread(self.read_stdout, ())
+            threading.Thread(target=self.read_stdout).start()
 
         if self.proc.stderr:
-            thread.start_new_thread(self.read_stderr, ())
+            threading.Thread(target=self.read_stderr).start()
 
     # And patched here
     def give_input(self, value):
@@ -79,12 +101,11 @@ else:
 # easy way of associating windows with their output panels, without causing strange bugs
 panelsByWindow = {}
 
-class PatchedExecCommand(execmodule.ExecCommand):
-    __metaclass__ = Monkeypatcher
+class PatchedExecCommand(execmodule.ExecCommand, metaclass=Monkeypatcher):
     def on_input_complete(self, value = None):
         """Show the output (which gets hidden) after taking the input"""
         if value is not None:
-            self.proc.give_input(value + '\n')
+            self.proc.give_input((value + '\n').encode(sys.getfilesystemencoding()))
             
         self.window.run_command("show_panel", {"panel": "output.exec"})
         self.window.focus_view(self.output_view)
