@@ -1,5 +1,5 @@
 [
-	{ "keys": ["enter"], "command": "exec", "args": { "give_input": "true" }, "context":
+	{ "keys": ["f12"], "command": "exec", "args": { "give_input": "true" }, "context":
 		[{"key": "build_selected"}]
 	}
 ]
