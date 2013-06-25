@@ -29,7 +29,7 @@ It is currently not possible for sublime text to show both the input and output 
 
 For __ST2__, simply clone the repository to your `Packages` directory.
 
-For __ST3__, do the same and checkout to ST3 branch.
+For __ST3__, do the same and checkout to `ST3` branch.
 
 ## Notes
 
